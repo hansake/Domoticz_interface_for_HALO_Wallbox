@@ -1,5 +1,5 @@
 # Domoticz_interface_for_HALO_Wallbox
-Domoticz interface for HALO Wallbox Electric Car Charger
+Domoticz interface for HALO Wallbox Electric Car Charger from Charge Amps
 
 This dzVents script is using the API towards the HALO Wallbox cloud service.
 To get the needed API key you have to contact Charge Amps (https://charge-amps.com/).
