@@ -1,0 +1,105 @@
+-- dzVents script: "charge_amps.lua" to fetch charging information from Charge Amps HALO Wallbox and present it in Domoticz
+--
+-- dzVents Version: 2.4 or higher is needed
+--
+-- A virtual sensor must be created in Domotics
+--  Setup > Hardware, Add: "Dummy (Does nothing, use for virtual switches only)", name the virtual hardware something
+--  Setup > Hardware > for created virtual hardware > Create Virtual Sensors, use Sensor Type: "Electric (Instant+Counter)"
+--    in this dzVents script the virtual sensor is named "Billaddare kWh"
+--
+-- The following Domoticz user variables must be set:
+--   chargeAmpsApiKey: a valid API key
+--   chargeAmpsSerial: the charger serial number
+--   chargeAmpsChargerCode: the charger code, this is the WiFi password which is delivered with the Halo Wallbox
+--
+local DEBUGPRT = false -- true if debug print to log, else false
+
+return {
+    on = {
+        timer = {"every 10 minutes"},
+        httpResponses = {"statusTrigger", "sessionTrigger"}
+    },
+    data = {
+        lastChargerStatus = { initial = "Offline" },
+        totalChargerSumWh = { initial = 0.0 }
+    },
+    execute = function(domoticz, item)
+        local charger = domoticz.devices("Billaddare kWh")
+        -- First check that all parameters in user variables are set
+        if domoticz.variables("chargeAmpsApiKey") and domoticz.variables("chargeAmpsSerial") and domoticz.variables("chargeAmpsChargerCode") then
+            if (item.isTimer) then
+                -- Send a status request
+                domoticz.openURL({
+                    url = "https://iapi.charge.space/v1/chargers/"..domoticz.variables("chargeAmpsSerial").value.."/status",
+                    headers = { ["Authorization"] = "Basic "..domoticz.variables("chargeAmpsApiKey").value, ["ChargerCode"] = domoticz.variables("chargeAmpsChargerCode").value },
+                    method = "GET",
+                    callback = "statusTrigger"
+                })
+            end
+        end
+        if (item.isHTTPResponse and item.ok and item.isJSON) then
+            if (item.trigger == "statusTrigger") then
+                if (DEBUGPRT == true) then
+                    print(string.format("Charger status: %s", item.json.chargerStatus))
+                    print(string.format("Last Charger status: %s", domoticz.data.lastChargerStatus))
+                    print(string.format("Accumulated consumption totalChargerSumWh: %f Wh", domoticz.data.totalChargerSumWh))
+                    if (item.json.chargerStatus == "Charging") then
+                        print(string.format("Total Consumption: %s kWh", item.json.totalConsumptionKwh))
+                        print(string.format("Charging Current: %s A", item.json.chargingCurrent))
+                        print(string.format("Charging Voltage: %s V", item.json.chargingVoltage))
+                    end
+                end
+                if (item.json.chargerStatus == "Charging") then
+                    local totalWh = (item.json.totalConsumptionKwh * 1000) + domoticz.data.totalChargerSumWh
+                    charger.updateElectricity(item.json.chargingCurrent * item.json.chargingVoltage, totalWh)
+                    if (DEBUGPRT == true) then
+                        print(string.format("updateElectricity(%f W, %f Wh)", item.json.chargingCurrent * item.json.chargingVoltage, totalWh))
+                    end
+                domoticz.data.lastChargerStatus = "Charging"
+                end
+                if (item.json.chargerStatus == "Online") then
+                    if (domoticz.data.lastChargerStatus == "Charging") then
+                        -- Send a session request when status switched from "Charging" to "Online"
+                        domoticz.openURL({
+                            url = "https://iapi.charge.space/v1/chargers/"..domoticz.variables("chargeAmpsSerial").value.."/sessions?startTime="..os.date("%Y-%m-%d"),
+                            headers = { ["Authorization"] = "Basic "..domoticz.variables("chargeAmpsApiKey").value, ["ChargerCode"] = domoticz.variables("chargeAmpsChargerCode").value },
+                            method = "GET",
+                            callback = "sessionTrigger"
+                        })
+                    else
+                        charger.updateElectricity(0.0, domoticz.data.totalChargerSumWh)
+                        if (DEBUGPRT == true) then
+                            print(string.format("updateElectricity(%f W, %f Wh)", 0.0, domoticz.data.totalChargerSumWh))
+                        end
+                    end
+                    domoticz.data.lastChargerStatus = "Online"
+                end
+                if (item.json.chargerStatus == "Offline") then
+                    domoticz.data.LastChargerStatus = "Offline"
+                end
+            end
+            if (item.trigger == "sessionTrigger") then
+                if (0 < #item.json) then -- make sure that data is returned
+                    if (DEBUGPRT == true) then
+                        print(string.format("id: %s", item.json[1].id))
+                        print(string.format("chargPointId: %s", item.json[1].chargPointId))
+                        print(string.format("totalConsumptionKwh: %s kWh", item.json[1].totalConsumptionKwh))
+                        print(string.format("startTime: %s", item.json[1].startTime))
+                        print(string.format("endTime: %s", item.json[1].endTime))
+                    end
+                    local sessionTotalWh = (item.json[1].totalConsumptionKwh * 1000) + domoticz.data.totalChargerSumWh
+                    charger.updateElectricity(0.0, sessionTotalWh) -- update meter for this completed charging session
+                    if (DEBUGPRT == true) then
+                        print(string.format("updateElectricity(%f W, %f Wh)", 0.0, sessionTotalWh))
+                    end
+                    domoticz.data.totalChargerSumWh = sessionTotalWh
+                else
+                    charger.updateElectricity(0.0, domoticz.data.totalChargerSumWh)
+                    if (DEBUGPRT == true) then
+                        print(string.format("updateElectricity(%f W, %f Wh)", 0.0, domoticz.data.totalChargerSumWh))
+                    end
+                end
+            end
+        end
+    end
+}
