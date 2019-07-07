@@ -5,7 +5,6 @@ This dzVents script is using the API towards the HALO Wallbox cloud service.
 To get the needed API key you have to contact Charge Amps (https://charge-amps.com/).
 
 First create a virtual sensor:
-
 Create a dummy hardware device of type "Electric (Instant+Counter)"
 * Setup > Hardware > Dummy (Does nothing, use for virtual switches only)
 * Create Virtual Sensors > Electric (Instant+Counter)
